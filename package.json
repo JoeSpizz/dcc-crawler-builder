@@ -1,0 +1,9 @@
+{
+  "name": "dcc-race-class-builder",
+  "private": true,
+  "description": "Public point-buy Race & Class builder for the Dungeon Crawler Carl RPG",
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^11.0.0"
+  }
+}

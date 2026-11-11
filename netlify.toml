@@ -1,0 +1,6 @@
+# Static page in /public, API function in /netlify/functions (Netlify's default). No build step.
+[build]
+  publish = "public"
+
+[functions]
+  node_bundler = "esbuild"

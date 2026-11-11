@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race &amp; Class Builder · Dungeon Crawler Carl RPG</title>
+<meta name="description" content="Build custom Races and Classes for the Dungeon Crawler Carl RPG with the rulebook's point-buy system, then copy them straight into Discord.">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <h1><a href="#" data-act="home">Race &amp; Class Builder</a></h1>
+    <p>Point-buy Races and Classes for the Dungeon Crawler Carl RPG</p>
+    <p id="sync" class="sync" aria-live="polite"></p>
+  </div>
+  <div class="bar io">
+    <button data-act="export" title="Download every build on this site as a JSON file">Download all</button>
+    <button data-act="import" title="Add builds from a file made with Download all, or a Crawler Roster backup">Import</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+  </div>
+</header>
+
+<main id="builder"><p class="hint">Loading…</p></main>
+
+<footer class="foot">
+  <p>Everything here is shared: anyone with the link can see, edit and delete any build. Download all now and then to keep your own copy.</p>
+  <p>A fan-made tool. Not affiliated with the makers of Dungeon Crawler Carl or its RPG.</p>
+</footer>
+
+<div id="toast" class="toast" role="status" popover="manual" hidden></div>
+
+<dialog id="ask">
+  <div class="dlg">
+    <div class="dlg-head"><h2 id="askTitle"></h2></div>
+    <div class="dlg-body">
+      <p id="askMsg" class="hint"></p>
+      <div class="row-btns end"><button id="askCancel" type="button">Cancel</button><button id="askOk" class="primary">OK</button></div>
+    </div>
+  </div>
+</dialog>
+
+<script src="rules.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
