@@ -30,7 +30,8 @@ const FB_TIERS = [
     {template:'Once per session, gain: {benefit}, under this condition: {condition}', params:[prm('benefit','text','Non-combat benefit'), prm('condition','text','Specific condition')]},
   ]},
   {key:'moderate', label:'Moderate', cost:2, color:'#38bdf8', items:[
-    {template:'+{n} in {skill} (max 5 Passive Skill points per build)', params:[prm('skill','text','Skill or Spell')], stack:stk(1, 5, 'passiveSkill')},
+    {template:'+{n} in {skill} (Passive Skill; max 5 Passive Skill points per build)', params:[prm('skill','text','Passive Skill')], stack:stk(1, 5, 'passiveSkill')},
+    {template:'+{n} in {skill}', params:[prm('skill','text','Skill or Spell (non-passive)')], stack:stk()},
     {template:'Heal 1 Health Bar when you damage/kill with {skill} (up to 5 per combat scene)', params:[prm('skill','text','Weapon Skill or Spell')]},
     {template:'Add your Stat Mod a second time when making an attack in {condition}', params:[prm('condition','text','Common circumstance')]},
     {template:'Roll with Advantage on Skill Advancement Checks for {skill}', params:[prm('skill','text','Skill')]},
