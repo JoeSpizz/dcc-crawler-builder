@@ -48,8 +48,10 @@ const str = (v, n) => String(v ?? "").slice(0, n);
 const list = (a) => (Array.isArray(a) ? a : []).slice(0, MAX_TRAITS).map((t) => ({
   id: isId(t?.id) ? t.id : randomUUID(),
   text: str(t?.text, 600),
-  cost: Math.max(0, Math.min(10, Math.trunc(Number(t?.cost)) || 0)),
+  cost: Math.max(0, Math.min(60, Math.trunc(Number(t?.cost)) || 0)),   // stacked traits cost tier × qty
   tier: str(t?.tier, 30),
+  qty: Math.max(1, Math.min(60, Math.trunc(Number(t?.qty)) || 1)),
+  stackId: /^[A-Za-z0-9_-]{0,40}$/.test(String(t?.stackId ?? "")) ? String(t?.stackId ?? "") : "",
   color: typeof t?.color === "string" && HEX.test(t.color) ? t.color : "",
 }));
 function cleanBuild(b, id) {

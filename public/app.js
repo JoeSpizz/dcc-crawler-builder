@@ -94,7 +94,25 @@ function ask({title, message = '', ok = 'OK', cancel = 'Cancel', danger = false}
 const KIND_COLOR = {race:'#2dd4bf', class:'#f43f5e'};
 const KIND_LABEL = {race:'Race', class:'Class'};
 const fillTpl = (tpl, vals) => Object.keys(vals).reduce((o, k) => o.split(`{${k}}`).join(vals[k] || `{${k}}`), tpl);
-const previewTpl = it => (it.params || []).reduce((o, pr) => o.split(`{${pr.key}}`).join(`[${pr.label}]`), it.template);
+const previewTpl = it => (it.params || []).reduce((o, pr) => o.split(`{${pr.key}}`).join(`[${pr.label}]`), it.template.split('{n}').join(it.stack ? it.stack.per : 1));
+// "Minor", or "Minor ×3" for a stacked pick
+const tierTag = t => [t.tier, t.qty > 1 ? `×${t.qty}` : ''].filter(Boolean).join(' ');
+// Work out how a picked item was made, so its typed-in text can be edited later.
+// Returns {it, vals} when the text matches one of its tier's templates, {custom:true} otherwise.
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function parsePick(x, list){
+  const t = (list === 'benefits' ? FB_TIERS : FD_TIERS).find(t => t.label === x.tier);
+  for (const it of t ? t.items : []) {
+    const keys = [], parts = it.template.split(/\{(\w+)\}/);
+    const re = new RegExp('^' + parts.map((p, i) => i % 2 ? (keys.push(p), p === 'n' ? '(\\d+)' : '([\\s\\S]+?)') : reEsc(p)).join('') + '$');
+    const m = x.text.match(re); if (!m) continue;
+    const vals = Object.fromEntries(keys.map((k, i) => [k, m[i + 1]]));
+    const ok = it.params.every(pr => pr.type === 'text' || (pr.type === 'stat' ? FSTATS : pr.options).includes(vals[pr.key]));
+    if (ok) return {it, vals};
+  }
+  return {custom:true};
+}
+const editFields = p => p.custom ? [{key:'text', label:'Text'}] : p.it.params.filter(pr => pr.type === 'text');
 const sumCost = a => a.reduce((s, x) => s + (Number(x.cost) || 0), 0);
 
 function blankBuild(kind){
@@ -102,7 +120,8 @@ function blankBuild(kind){
 }
 function normalizeBuild(b){
   b = b || {};
-  const pick = arr => (Array.isArray(arr) ? arr : []).map(x => ({id:x.id || uid(), text:String(x.text || ''), cost:Number(x.cost) || 0, tier:x.tier || '', color:x.color || ''}));
+  const pick = arr => (Array.isArray(arr) ? arr : []).map(x => ({id:x.id || uid(), text:String(x.text || ''), cost:Number(x.cost) || 0, tier:x.tier || '', color:x.color || '',
+    qty:Math.max(1, Math.trunc(Number(x.qty)) || 1), stackId:String(x.stackId || '')}));
   return {id:b.id || uid(), kind: b.kind === 'class' ? 'class' : 'race', name:String(b.name || ''), origin: b.origin === 'Alien' ? 'Alien' : 'Earth',
     typeTags:String(b.typeTags || ''), flavor:String(b.flavor || ''), benefits:pick(b.benefits), detriments:pick(b.detriments),
     sheetRev:Number(b.sheetRev) || 0, createdAt:b.createdAt || '', updatedAt:b.updatedAt || ''};
@@ -131,7 +150,7 @@ function buildDiscordText(b, {approvedBy = '', link = ''} = {}){
   const sub = b.kind === 'race' ? `${mdEsc(b.origin)} origin` : b.typeTags.trim() ? `Class type: ${oneLine(b.typeTags)}` : '';
   const head = [`**${KIND_LABEL[b.kind]}**`, sub, approvedBy ? `✓ ${mdEsc(approvedBy)} approved` : ''].filter(Boolean).join(' · ');
   const flavor = b.flavor.split('\n').map(l => l.trim()).filter(Boolean).map(l => `*${mdEsc(l)}*`);
-  const tag = t => '`' + [String(t.tier || '').replace(/`/g, ''), `${t.cost} BP`].filter(Boolean).join(' · ') + '`';
+  const tag = t => '`' + [tierTag(t).replace(/`/g, ''), `${t.cost} BP`].filter(Boolean).join(' · ') + '`';
   const list = arr => arr.length ? arr.map(t => `• ${tag(t)} ${oneLine(t.text)}`) : ['• None'];
   return [
     `## ${oneLine(b.name || 'Unnamed')}`, head, ...flavor,
@@ -141,6 +160,66 @@ function buildDiscordText(b, {approvedBy = '', link = ''} = {}){
     ...(b.kind === 'race' ? [`-# ${mdEsc(b.origin)} origin: ${mdEsc(ORIGIN_PERK[b.origin])}`] : []),
     ...(link ? [`-# <${link}>`] : []),   // <...> stops Discord from adding a link preview
   ].join('\n');
+}
+/* "Pretty copy": works on drafts too. Puts formatted HTML on the clipboard (for docs, email, chat apps
+   that keep formatting) with a tidy plain-text version for everywhere else. */
+function buildStatus(b){
+  if (bFinished(b)) return '';
+  const c = bpCalc(b);
+  return c.remaining < 0 ? `Draft, over budget by ${-c.remaining} BP` : c.remaining > 0 ? `Draft, ${c.remaining} BP left` : 'Draft';
+}
+function prettyParts(b){
+  const c = bpCalc(b);
+  return {
+    name: b.name.trim() || 'Unnamed',
+    sub: [KIND_LABEL[b.kind], b.kind === 'race' ? `${b.origin} origin` : b.typeTags.trim() ? `Class type: ${b.typeTags.trim()}` : '', buildStatus(b)].filter(Boolean).join(' · '),
+    flavor: b.flavor.trim(),
+    tag: t => [tierTag(t), `${t.cost} BP`].filter(Boolean).join(' · '),
+    points: `${c.spent} of ${c.total} Build Points (${BASE_BP[b.kind]} base${c.extra ? ` + ${c.extra} from detriments` : ''})`,
+    perk: b.kind === 'race' ? `${b.origin} origin: ${ORIGIN_PERK[b.origin]}` : '',
+  };
+}
+function buildPrettyText(b){
+  const p = prettyParts(b), rule = '─'.repeat(Math.min(40, Math.max(p.name.length, p.sub.length)));
+  const list = arr => arr.length ? arr.map(t => `  • [${p.tag(t)}] ${t.text.replace(/\s*\n\s*/g, ' ').trim()}`) : ['  • None'];
+  return [
+    p.name.toUpperCase(), p.sub, rule,
+    ...(p.flavor ? [p.flavor, ''] : []),
+    'BENEFITS', ...list(b.benefits), '',
+    'DETRIMENTS', ...list(b.detriments), '',
+    p.points, ...(p.perk ? [p.perk] : []),
+  ].join('\n');
+}
+function buildPrettyHTML(b){
+  const p = prettyParts(b), kc = KIND_COLOR[b.kind];
+  const list = (arr, color) => arr.length
+    ? `<ul style="margin:4px 0 12px;padding-left:20px">${arr.map(t => `<li style="margin:2px 0"><span style="color:${color};font-weight:bold">[${esc(p.tag(t))}]</span> ${esc(t.text)}</li>`).join('')}</ul>`
+    : '<p style="margin:4px 0 12px"><i>None</i></p>';
+  return `<div>
+    <h2 style="margin:0;color:${kc}">${esc(p.name)}</h2>
+    <p style="margin:2px 0 8px"><b>${esc(p.sub)}</b></p>
+    ${p.flavor ? `<p style="margin:0 0 10px"><i>${esc(p.flavor).replace(/\n/g, '<br>')}</i></p>` : ''}
+    <h3 style="margin:8px 0 0;color:#16a34a">Benefits</h3>${list(b.benefits, '#16a34a')}
+    <h3 style="margin:8px 0 0;color:#dc2626">Detriments</h3>${list(b.detriments, '#dc2626')}
+    <p style="margin:0;color:#6b7280"><small>${esc(p.points)}${p.perk ? `<br>${esc(p.perk)}` : ''}</small></p>
+  </div>`;
+}
+async function copyRich(html, text){
+  try {
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], {type:'text/html'}),
+        'text/plain': new Blob([text], {type:'text/plain'}),
+      })]);
+      return true;
+    }
+  } catch (e) {}
+  return copyText(text);
+}
+async function prettyCopy(btn){
+  const b = bview.draft;
+  if (!await copyRich(buildPrettyHTML(b), buildPrettyText(b))) { toast("Your browser didn't allow copying. Try again, or use a different browser."); return; }
+  flash(btn, 'Copied ✓');
 }
 async function copyText(text){
   try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
@@ -166,13 +245,13 @@ async function copyBuild(btn){
 }
 
 /* ---------- views ---------- */
-let bview = null;   // null = all builds; otherwise {draft, orig, readOnly, subTab, openTier, expanded, form, custom}
+let bview = null;   // null = all builds; otherwise {draft, orig, readOnly, subTab, openTier, expanded, form, custom, editing, edit}
 let query = '', sortBy = lsGet('rcb:sort') === 'new' ? 'new' : 'name';
 let renderedSig = '';
 const bDirty = () => !!bview && !bview.readOnly && JSON.stringify(bview.draft) !== bview.orig;
 const sig = () => JSON.stringify(state.builds.map(b => [b.id, b.sheetRev]));
 const curTiers = () => bview.subTab === 'benefits' ? FB_TIERS : FD_TIERS;
-const openView = (draft, readOnly) => ({draft, orig: JSON.stringify(draft), readOnly, subTab:'benefits', openTier:'minor', expanded:null, form:{}, custom:{}});
+const openView = (draft, readOnly) => ({draft, orig: JSON.stringify(draft), readOnly, subTab:'benefits', openTier:'minor', expanded:null, form:{}, custom:{}, editing:null, edit:{}});
 // finished builds open on their sheet (with Click to copy); drafts open straight into the editor
 const openBuild = b => openView(clone(b), bFinished(b));
 
@@ -252,7 +331,7 @@ function bcardHTML(b){
   </a>`;
 }
 const traitList = (arr, cls) => arr.length
-  ? `<ul class="traits ${cls}">${arr.map(t => `<li>${t.tier ? `<span class="tier">${esc(t.tier)} · ${t.cost} BP</span>` : ''}${esc(t.text)}</li>`).join('')}</ul>`
+  ? `<ul class="traits ${cls}">${arr.map(t => `<li>${t.tier ? `<span class="tier">${esc(tierTag(t))} · ${t.cost} BP</span>` : ''}${esc(t.text)}</li>`).join('')}</ul>`
   : '<p class="muted">None.</p>';
 
 function sheetHTML(){
@@ -270,6 +349,7 @@ function sheetHTML(){
     </div>
     <div class="row-btns" style="margin-top:14px">
       <button class="primary" data-bact="copy" ${done ? '' : 'disabled'} title="Copies the build as text ready to paste into Discord">Click to copy</button>
+      <button data-bact="pretty" title="Copies a nicely formatted version for sharing anywhere, even if it's still a draft">Pretty copy</button>
       <button data-bact="link" title="Copies a link to this page">Copy link</button>
       <button data-bact="edit">Edit</button>
       <button data-bact="dup" title="Start a new build from this one">Duplicate</button>
@@ -282,9 +362,16 @@ function editorHTML(){
   const v = bview, b = v.draft, c = bpCalc(b), kc = KIND_COLOR[b.kind];
   const exists = !!byId(b.id);
   const pct = c.total > 0 ? Math.min(100, Math.max(0, c.spent / c.total * 100)) : 0;
-  const picked = (arr, list) => arr.length ? arr.map(x => `<div class="picked" style="--tc:${x.color || 'var(--muted)'}">
-      <span class="picked-text"><span class="dot"></span><span>${x.tier ? `<span class="tier">${esc(x.tier)}</span>` : ''}${esc(x.text)}</span></span>
-      <span class="picked-cost">${x.cost} BP <button class="icon danger" data-bact="remove" data-list="${list}" data-id="${esc(x.id)}" aria-label="Remove">✕</button></span></div>`).join('')
+  const picked = (arr, list) => arr.length ? arr.map(x => {
+      const p = parsePick(x, list), fields = editFields(p), tag = x.tier ? `<span class="tier">${esc(tierTag(x))}</span>` : '';
+      if (v.editing === x.id) return `<div class="picked editing" style="--tc:${x.color || 'var(--muted)'}">
+        <span class="picked-text"><span class="dot"></span><span>${tag}${p.custom ? '' : esc(fillTpl(p.it.template, {...p.vals, ...Object.fromEntries(fields.map(f => [f.key, `[${f.label}]`]))}))}</span></span>
+        ${fields.map(f => `<label>${p.custom ? '' : esc(f.label)}<textarea data-pedit="${f.key}" rows="${p.custom ? 3 : 1}" maxlength="600" aria-label="${esc(f.label)}">${esc(v.edit[f.key] ?? '')}</textarea></label>`).join('')}
+        <div class="row-btns"><button class="go" data-bact="psave" data-list="${list}" data-id="${esc(x.id)}" ${fields.every(f => String(v.edit[f.key] || '').trim()) ? '' : 'disabled'}>Save</button><button data-bact="pcancel">Cancel</button></div></div>`;
+      return `<div class="picked" style="--tc:${x.color || 'var(--muted)'}">
+      <span class="picked-text"><span class="dot"></span><span>${tag}${esc(x.text)}</span></span>
+      <span class="picked-cost">${x.cost} BP ${fields.length ? `<button class="icon" data-bact="pedit" data-list="${list}" data-id="${esc(x.id)}" aria-label="Edit" title="Edit">✎</button>` : ''}<button class="icon danger" data-bact="remove" data-list="${list}" data-id="${esc(x.id)}" aria-label="Remove">✕</button></span></div>`;
+    }).join('')
     : '<p class="empty-line">None yet.</p>';
   return `<div class="b-top" style="--kc:${kc}"><button data-bact="back">← All builds</button><h2 id="bTitle">${esc(b.name || 'New ' + b.kind)}</h2><span class="pill kind">${KIND_LABEL[b.kind]}</span></div>
   <div class="b-layout" style="--kc:${kc}">
@@ -315,6 +402,7 @@ function editorHTML(){
       <div class="side-btns">
         <button class="primary" data-bact="save">Save build</button>
         <button data-bact="copy" ${bFinished(b) ? '' : 'disabled'} title="Copies the build as text ready to paste into Discord">Click to copy</button>
+        <button data-bact="pretty" title="Copies a nicely formatted version for sharing anywhere, even if it's still a draft">Pretty copy</button>
         <p class="hint" id="copyHint"></p>
         ${exists ? '<button data-bact="dup" title="Start a new build from this one">Duplicate</button><button class="danger" data-bact="delete">Delete build</button>' : ''}
       </div>
@@ -328,8 +416,10 @@ function tierHTML(t){
   const ck = `${v.subTab}:${t.key}`, customVal = v.custom[ck] || '';
   const body = !open ? '' : `<div class="ftier-body">
     ${t.items.map((it, i) => {
-      const exp = v.expanded === `${ck}:${i}`, needs = it.params.length > 0;
-      return `<div class="fitem"><span>${esc(previewTpl(it))}</span>${exp ? '' : `<button data-bact="${needs ? 'expand' : 'add'}" data-tier="${t.key}" data-idx="${i}" ${afford ? '' : 'disabled title="Not enough Build Points"'}>+ Add</button>`}</div>
+      const exp = v.expanded === `${ck}:${i}`, needs = it.params.length > 0 || !!it.stack;
+      const capped = it.stack && it.stack.max && stackLeft(it) < 1;
+      const off = capped ? `disabled title="Limit of ${it.stack.max} per build reached"` : afford ? '' : 'disabled title="Not enough Build Points"';
+      return `<div class="fitem"><span>${esc(previewTpl(it))}${it.stack ? ' <span class="stackable" title="Pick a quantity before adding">stackable</span>' : ''}</span>${exp ? '' : `<button data-bact="${needs ? 'expand' : 'add'}" data-tier="${t.key}" data-idx="${i}" ${off}>+ Add</button>`}</div>
         ${exp ? formHTML(t, it, i) : ''}`;
     }).join('')}
     <div class="fcustom"><input data-custom="${ck}" value="${esc(customVal)}" maxlength="600" placeholder="Write your own ${isBen ? 'benefit' : 'detriment'} (be specific)…" aria-label="Custom ${t.label} ${isBen ? 'benefit' : 'detriment'}">
@@ -342,9 +432,32 @@ function formHTML(t, it, i){
   const field = pr => pr.type === 'text'
     ? `<label>${esc(pr.label)}<input data-param="${pr.key}" value="${esc(f[pr.key] || '')}" placeholder="${esc(pr.label)}"></label>`
     : `<div><span class="hint">${esc(pr.label)}</span><div class="chips">${(pr.type === 'stat' ? FSTATS : pr.options).map(o => `<button data-bact="param" data-key="${pr.key}" data-val="${esc(o)}" aria-pressed="${f[pr.key] === o}">${esc(o)}</button>`).join('')}</div></div>`;
-  return `<div class="fform">${it.params.map(field).join('')}
-    <div class="row-btns"><button class="go" data-bact="confirm" data-tier="${t.key}" data-idx="${i}" ${paramsReady(it) ? '' : 'disabled'}>Confirm add</button><button data-bact="collapse">Cancel</button></div></div>`;
+  let stepper = '', label = 'Confirm add';
+  if (it.stack) {
+    const max = qtyMax(t, it), q = formQty(t, it), per = it.stack.per;
+    stepper = `<div><span class="hint">Quantity${it.stack.max ? ` (up to ${it.stack.max} per build)` : ''}</span><div class="stepper">
+      <button data-bact="qty" data-d="-1" ${q <= 1 ? 'disabled' : ''} aria-label="Fewer">−</button>
+      <span class="qty" aria-live="polite">×${q}</span>
+      <button data-bact="qty" data-d="1" ${q >= max ? 'disabled' : ''} aria-label="More">+</button>
+      <span class="hint">${per === 1 ? '' : `${q * per} total, `}${q * t.cost} BP</span></div></div>`;
+    label = `Confirm add (${q * t.cost} BP)`;
+  }
+  return `<div class="fform">${it.params.map(field).join('')}${stepper}
+    <div class="row-btns"><button class="go" data-bact="confirm" data-tier="${t.key}" data-idx="${i}" ${paramsReady(it) ? '' : 'disabled'}>${label}</button><button data-bact="collapse">Cancel</button></div></div>`;
 }
+const curList = () => bview.draft[bview.subTab === 'benefits' ? 'benefits' : 'detriments'];
+// how many more of a capped stackable item this build may take
+function stackLeft(it){
+  const s = it.stack; if (!s || !s.max) return Infinity;
+  return s.max - curList().filter(x => x.stackId === s.id).reduce((a, x) => a + x.qty, 0);
+}
+// largest quantity allowed: the item's cap and, for benefits, the Build Points left
+function qtyMax(t, it){
+  let m = Math.min(stackLeft(it), 30);
+  if (bview.subTab === 'benefits') m = Math.min(m, Math.floor(bpCalc(bview.draft).remaining / t.cost));
+  return Math.max(0, m);
+}
+const formQty = (t, it) => Math.max(1, Math.min(qtyMax(t, it), Math.trunc(bview.form.qty) || 1));
 const paramsReady = it => it.params.every(pr => String(bview.form[pr.key] || '').trim());
 function expandedItem(){
   if (!bview.expanded) return null;
@@ -358,10 +471,10 @@ function syncFinish(){
   if (copy) copy.disabled = !can;
   if (hint && (!can || hint.dataset.why)) { hint.textContent = can ? '' : unfinishedWhy(bview.draft); hint.dataset.why = can ? '' : '1'; }
 }
-function addPick(t, text){
+function addPick(t, text, qty = 1, stackId = ''){
   const b = bview.draft, isBen = bview.subTab === 'benefits';
-  if (isBen && t.cost > bpCalc(b).remaining) { toast('Not enough Build Points for that.'); return; }
-  b[isBen ? 'benefits' : 'detriments'].push({id:uid(), text, cost:t.cost, tier:t.label, color:t.color});
+  if (isBen && t.cost * qty > bpCalc(b).remaining) { toast('Not enough Build Points for that.'); return; }
+  b[isBen ? 'benefits' : 'detriments'].push({id:uid(), text, cost:t.cost * qty, tier:t.label, color:t.color, qty, stackId});
 }
 
 /* ---------- saving ---------- */
@@ -422,19 +535,44 @@ $('#builder').addEventListener('click', async e => {
     }
     case 'link': if (await copyText(buildLink(v.draft.id))) flash(btn, 'Link copied ✓'); else toast("Your browser didn't allow copying."); return;
     case 'copy': return copyBuild(btn);   // no redraw: the button shows "Copied"
+    case 'pretty': return prettyCopy(btn);
     case 'origin': v.draft.origin = btn.dataset.val; break;
     case 'sub': v.subTab = btn.dataset.sub; v.expanded = null; v.form = {}; break;
     case 'tier': v.openTier = v.openTier === btn.dataset.tier ? null : btn.dataset.tier; v.expanded = null; v.form = {}; break;
     case 'expand': v.expanded = `${v.subTab}:${btn.dataset.tier}:${btn.dataset.idx}`; v.form = {}; break;
     case 'collapse': v.expanded = null; v.form = {}; break;
     case 'param': v.form[btn.dataset.key] = btn.dataset.val; break;
+    case 'qty': {
+      const [, tk, i] = v.expanded.split(':'), t = curTiers().find(x => x.key === tk);
+      v.form.qty = formQty(t, t.items[+i]) + Number(btn.dataset.d); break;
+    }
     case 'add': case 'confirm': {
       const t = curTiers().find(x => x.key === btn.dataset.tier), it = t.items[+btn.dataset.idx];
-      addPick(t, a === 'add' ? it.template : fillTpl(it.template, v.form)); v.expanded = null; v.form = {}; break;
+      if (it.stack) {
+        const q = formQty(t, it);
+        if (q < 1 || q > qtyMax(t, it)) { toast(it.stack.max && stackLeft(it) < 1 ? `That one is limited to ${it.stack.max} per build.` : 'Not enough Build Points for that.'); return; }
+        addPick(t, fillTpl(it.template, {...v.form, n: String(q * it.stack.per)}), q, it.stack.id);
+      } else addPick(t, a === 'add' ? it.template : fillTpl(it.template, v.form));
+      v.expanded = null; v.form = {}; break;
     }
     case 'custom': {
       const k = `${v.subTab}:${btn.dataset.tier}`, txt = (v.custom[k] || '').trim(); if (!txt) return;
       addPick(curTiers().find(x => x.key === btn.dataset.tier), txt); v.custom[k] = ''; break;
+    }
+    case 'pedit': {
+      const x = v.draft[btn.dataset.list].find(x => x.id === btn.dataset.id); if (!x) return;
+      const p = parsePick(x, btn.dataset.list);
+      v.editing = x.id; v.edit = p.custom ? {text:x.text} : Object.fromEntries(editFields(p).map(f => [f.key, p.vals[f.key]]));
+      render(); $(`#builder [data-pedit]`)?.focus(); return;
+    }
+    case 'pcancel': v.editing = null; v.edit = {}; break;
+    case 'psave': {
+      const x = v.draft[btn.dataset.list].find(x => x.id === btn.dataset.id); if (!x) return;
+      const p = parsePick(x, btn.dataset.list), fields = editFields(p);
+      if (!fields.every(f => String(v.edit[f.key] || '').trim())) return;
+      const clean = Object.fromEntries(fields.map(f => [f.key, String(v.edit[f.key]).trim()]));
+      x.text = p.custom ? clean.text : fillTpl(p.it.template, {...p.vals, ...clean});
+      v.editing = null; v.edit = {}; break;
     }
     case 'remove': { const arr = v.draft[btn.dataset.list], i = arr.findIndex(x => x.id === btn.dataset.id); if (i > -1) arr.splice(i, 1); break; }
     case 'save': await saveBuild(); return;
@@ -455,6 +593,10 @@ $('#builder').addEventListener('input', e => {
     bview.form[el.dataset.param] = el.value;
     const go = el.closest('.fform')?.querySelector('[data-bact="confirm"]'), it = expandedItem();
     if (go && it) go.disabled = !paramsReady(it);
+  } else if (el.dataset.pedit) {
+    bview.edit[el.dataset.pedit] = el.value;
+    const box = el.closest('.picked'), go = box?.querySelector('[data-bact="psave"]');
+    if (go) go.disabled = ![...box.querySelectorAll('[data-pedit]')].every(i => i.value.trim());
   } else if (el.dataset.custom) {
     bview.custom[el.dataset.custom] = el.value;
     const t = curTiers().find(x => x.key === el.dataset.custom.split(':')[1]);
@@ -462,7 +604,13 @@ $('#builder').addEventListener('input', e => {
   }
 });
 $('#builder').addEventListener('keydown', e => {
-  if (e.key !== 'Enter' || !bview) return;
+  if (!bview) return;
+  if (e.target.dataset.pedit) {
+    if (e.key === 'Escape') { e.preventDefault(); e.target.closest('.picked')?.querySelector('[data-bact="pcancel"]')?.click(); }
+    else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.target.closest('.picked')?.querySelector('[data-bact="psave"]')?.click(); }
+    return;
+  }
+  if (e.key !== 'Enter') return;
   if (e.target.dataset.custom) { e.preventDefault(); e.target.nextElementSibling.click(); }
   if (e.target.dataset.param) { e.preventDefault(); e.target.closest('.fform')?.querySelector('[data-bact="confirm"]')?.click(); }
 });

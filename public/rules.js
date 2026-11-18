@@ -10,11 +10,14 @@ const ORIGIN_PERK = {
 
 const FSTATS = ['STR','CON','DEX','CHA','INT'];
 const prm = (key, type, label, options) => ({key, type, label, options});
+/* Stackable items take a quantity before they're added: {n} in the template becomes qty × per.
+   max (optional) caps the total across the whole build; id ties picks of the same item together. */
+const stk = (per = 1, max = 0, id = '') => ({per, max, id});
 const FB_TIERS = [
   {key:'minor', label:'Minor', cost:1, color:'#2dd4bf', items:[
-    {template:'+1 {stat}', params:[prm('stat','stat','Stat')]},
+    {template:'+{n} {stat}', params:[prm('stat','stat','Stat')], stack:stk()},
     {template:'Membership in {club}', params:[prm('club','choice','Club',['Club Desperado','Club Vanquisher'])]},
-    {template:'At the end of each floor, add 1 to your Skill Advancement Checks for {skill}', params:[prm('skill','text','Skill')]},
+    {template:'At the end of each floor, add {n} to your Skill Advancement Checks for {skill}', params:[prm('skill','text','Skill')], stack:stk()},
     {template:'{skill} can be raised to Rank 20', params:[prm('skill','text','Skill')]},
     {template:'Add your Stat Mod a second time when using {skill} in {condition}', params:[prm('skill','text','Skill (non-combat)'), prm('condition','text','Common circumstance')]},
     {template:'{benefit}, conditional on {condition}', params:[prm('benefit','text','Benefit'), prm('condition','text','Condition (e.g. attacking stone creatures)')]},
@@ -27,13 +30,13 @@ const FB_TIERS = [
     {template:'Once per session, gain: {benefit}, under this condition: {condition}', params:[prm('benefit','text','Non-combat benefit'), prm('condition','text','Specific condition')]},
   ]},
   {key:'moderate', label:'Moderate', cost:2, color:'#38bdf8', items:[
-    {template:'+1 in {skill} (max 5 Passive Skill points per build)', params:[prm('skill','text','Skill or Spell')]},
+    {template:'+{n} in {skill} (max 5 Passive Skill points per build)', params:[prm('skill','text','Skill or Spell')], stack:stk(1, 5, 'passiveSkill')},
     {template:'Heal 1 Health Bar when you damage/kill with {skill} (up to 5 per combat scene)', params:[prm('skill','text','Weapon Skill or Spell')]},
     {template:'Add your Stat Mod a second time when making an attack in {condition}', params:[prm('condition','text','Common circumstance')]},
     {template:'Roll with Advantage on Skill Advancement Checks for {skill}', params:[prm('skill','text','Skill')]},
-    {template:'At the end of each floor, add 1 to Skill Advancement Checks for {group}', params:[prm('group','text','Thematically linked group (e.g. all Charisma Skills)')]},
+    {template:'At the end of each floor, add {n} to Skill Advancement Checks for {group}', params:[prm('group','text','Thematically linked group (e.g. all Charisma Skills)')], stack:stk()},
     {template:'At the start of combat, change your damage to {damageType} for that combat', params:[prm('damageType','text','New damage type')]},
-    {template:'+1 DR Buff (to a limit of +3)', params:[]},
+    {template:'+{n} DR Buff (to a limit of +3)', params:[], stack:stk(1, 3, 'dr')},
     {template:'Can access any guild of type: {guild}', params:[prm('guild','text','Guild type (e.g. any Weapon Training Guild)')]},
     {template:'Double Mana regeneration from mending and resting, without a limit', params:[]},
     {template:'Membership in all professional and social clubs', params:[]},
@@ -66,8 +69,8 @@ const FB_TIERS = [
     {template:'Survive without breathing; Immunity to inhaled toxins', params:[]},
     {template:"Rage: your melee attacks deal +1 damage for each Health Bar slot you've lost", params:[]},
     {template:'Size 2 (Small) or less', params:[]},
-    {template:'+5ft Move', params:[]},
-    {template:'+5 Step', params:[]},
+    {template:'+{n}ft Move', params:[], stack:stk(5)},
+    {template:'+{n} Step', params:[], stack:stk(5)},
     {template:'Add 1d4 to your {checkType} for {stat}', params:[prm('checkType','choice','Check type',['Evade Checks','Stat Checks']), prm('stat','stat','Stat')]},
     {template:'Natural attack (Rank = Floor Number), 1d8 + {stat} Mod {damageType} damage; +1d8 at Rank 5/10/15', params:[prm('stat','stat','Stat Mod (to hit & damage)'), prm('damageType','text','Damage type')]},
     {template:'Advantage when using {skill}', params:[prm('skill','text','Specific non-combat Skill or Spell')]},
@@ -76,8 +79,8 @@ const FB_TIERS = [
     {template:'Gain a Climb Movement — automatically climb most surfaces, even ceilings', params:[]},
   ]},
   {key:'extreme', label:'Extreme', cost:4, color:'#fb923c', items:[
-    {template:"+1 in {skill} (a Skill you wouldn't normally be able to learn)", params:[prm('skill','text','Skill')]},
-    {template:'+1 to all Skills in {group} (3–5 Skills)', params:[prm('group','text','Name the thematically linked group')]},
+    {template:"+{n} in {skill} (a Skill you wouldn't normally be able to learn)", params:[prm('skill','text','Skill')], stack:stk()},
+    {template:'+{n} to all Skills in {group} (3–5 Skills)', params:[prm('group','text','Name the thematically linked group')], stack:stk()},
     {template:'Advantage on all Stat Checks for {stat}', params:[prm('stat','stat','Stat')]},
     {template:'{group} (up to 6 Skills) can be raised to Rank 20', params:[prm('group','text','Name the thematically linked group')]},
     {template:'Immunity to Poison', params:[]},
@@ -88,13 +91,13 @@ const FB_TIERS = [
     {template:'Doppelgänger shape-changing: {forms}', params:[prm('forms','text','What can you change into?')]},
   ]},
   {key:'epic', label:'Epic', cost:6, color:'#f43f5e', items:[
-    {template:'+1 to all Skills in {group}', params:[prm('group','text','Thematically linked group')]},
+    {template:'+{n} to all Skills in {group}', params:[prm('group','text','Thematically linked group')], stack:stk()},
     {template:'All Skills can be raised to Rank 20', params:[]},
     {template:'A significant defensive ability: {ability}', params:[prm('ability','text','Describe it (e.g. Immunity to a common damage type, or halve first nine hits/day)')]},
     {template:'The Limb Regeneration Benefit', params:[]},
     {template:'Roll with Advantage on all Skills in: {circumstances}', params:[prm('circumstances','text','Describe the wide-ranging circumstances')]},
     {template:'Immunity to Poison and all diseases', params:[]},
-    {template:'+1 in all Skills in {group} (6+ Skills)', params:[prm('group','text','Thematically linked group')]},
+    {template:'+{n} in all Skills in {group} (6+ Skills)', params:[prm('group','text','Thematically linked group')], stack:stk()},
     {template:'A significant defensive ability: {ability}', params:[prm('ability','text','Describe it (e.g. Advantage on Evade Checks, or Immunity to a damage type)')]},
     {template:'A powerful, flexible ability that can significantly change your Stats or Skills: {ability}', params:[prm('ability','text','Describe the ability')]},
     {template:'Changeling shapeshifting: {forms}', params:[prm('forms','text','What forms can you assume?')]},
@@ -105,10 +108,10 @@ const FB_TIERS = [
 const FD_TIERS = [
   {key:'minor', label:'Minor', cost:1, color:'#94a3b8', items:[
     {template:'Cannot choose Class due to membership in {club}', params:[prm('club','text','Which club?')]},
-    {template:'−2 {stat}', params:[prm('stat','stat','Stat')]},
-    {template:'−2 {skill}', params:[prm('skill','text','Skill')]},
-    {template:'−1 to all Skills under {stat}', params:[prm('stat','stat','Stat')]},
-    {template:'+1 Mana cost to cast spells not favored by your Class', params:[]},
+    {template:'−{n} {stat}', params:[prm('stat','stat','Stat')], stack:stk(2)},
+    {template:'−{n} {skill}', params:[prm('skill','text','Skill')], stack:stk(2)},
+    {template:'−{n} to all Skills under {stat}', params:[prm('stat','stat','Stat')], stack:stk()},
+    {template:'+{n} Mana cost to cast spells not favored by your Class', params:[], stack:stk()},
     {template:'Disadvantage using {group}, when: {condition}', params:[prm('group','text','Thematically linked group of Skills'), prm('condition','text','Condition')]},
     {template:'Must worship a deity', params:[]},
     {template:'Cannot worship a deity', params:[]},
@@ -123,7 +126,7 @@ const FD_TIERS = [
     {template:'{skill} only increases in Rank upon descent to the next floor', params:[prm('skill','text','Skill')]},
     {template:'Limited choice of weapons: {weapons}', params:[prm('weapons','text','Which weapons are you limited to?')]},
     {template:'No Stat Mod added to {skill}', params:[prm('skill','text','Weapon Skill from your Race or Class')]},
-    {template:'+3 Mana cost to: {spells}', params:[prm('spells','text','Which spell(s) from your Race or Class')]},
+    {template:'+{n} Mana cost to: {spells}', params:[prm('spells','text','Which spell(s) from your Race or Class')], stack:stk(3)},
     {template:'Disadvantage using {group}', params:[prm('group','text','Thematically linked group (e.g. all movement-related Skills)')]},
     {template:'Prohibited from using: {items}', params:[prm('items','text','Which wide category of items')]},
   ]},
